@@ -5,7 +5,7 @@ import 'dayjs/locale/zh-cn';
 import locale from 'ant-design-vue/es/date-picker/locale/zh_CN';
 import * as echarts from "echarts";
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
-import { getPageVisitData, getUserVisitTrendData, getUserVisitWeekTrendData, getUserVisitMonthTrendData } from "@/api/common/data";
+import { getPageVisitData, getUserVisitTrendData, getUserSummaryData, getUserRetainTrendData } from "@/api/common/data";
 import type { Dayjs } from 'dayjs';
 
 // 类型定义
@@ -27,6 +27,25 @@ interface TrendDataItem {
   stay_time_uv?: number;
   visit_depth?: number;
   [key: string]: any;
+}
+
+interface RetainDataItem {
+  ref_date: string;
+  visit_uv_new: {
+    key: number;
+    value: number;
+  }[];
+  visit_uv: {
+    key: number;
+    value: number;
+  }[];
+}
+
+interface SummaryDataItem {
+  ref_date: string;
+  visit_total: number;
+  share_pv: number;
+  share_uv: number;
 }
 
 defineOptions({
@@ -82,6 +101,19 @@ const activeTimeType = ref<string>('day');
 const selectedDate = ref<Dayjs | null>(null);
 // 发后端用的日期
 const backendDate = ref<string>('');
+// 访问数据概况
+const summaryData = ref<SummaryDataItem[]>([]);
+const summaryLoading = ref<boolean>(false);
+const summaryDate = ref<Dayjs | null>(null);
+
+// 留存数据相关
+const retainData = ref<RetainDataItem | null>(null);
+const activeRetainTimeType = ref<string>('day');
+const selectedRetainDate = ref<Dayjs | null>(null);
+const backendRetainDate = ref<string>('');
+const retainLoading = ref<boolean>(false);
+const retainChartRef = ref<HTMLElement | null>(null);
+let retainChart: echarts.ECharts | null = null;
 
 // 获取趋势数据的通用处理函数
 const handleTrendResponse = (response: any): void => {
@@ -93,7 +125,7 @@ const handleTrendResponse = (response: any): void => {
 // 获取日趋势
 const fetchDailyTrendData = async (date: string): Promise<void> => {
   try {
-    const response = await getUserVisitTrendData(date);
+    const response = await getUserVisitTrendData('daily', date);
     handleTrendResponse(response);
   } catch (error) {
     console.error('获取日趋势数据失败:', error);
@@ -104,7 +136,7 @@ const fetchDailyTrendData = async (date: string): Promise<void> => {
 const fetchWeeklyTrendData = async (date: string): Promise<void> => {
   try {
     const [startDate, endDate] = date.split('-');
-    const response = await getUserVisitWeekTrendData(startDate, endDate);
+    const response = await getUserVisitTrendData('weekly', startDate, endDate);
     handleTrendResponse(response);
   } catch (error) {
     console.error('获取周趋势数据失败:', error);
@@ -115,7 +147,7 @@ const fetchWeeklyTrendData = async (date: string): Promise<void> => {
 const fetchMonthlyTrendData = async (date: string): Promise<void> => {
   try {
     const [startDate, endDate] = date.split('-');
-    const response = await getUserVisitMonthTrendData(startDate, endDate);
+    const response = await getUserVisitTrendData('monthly', startDate, endDate);
     handleTrendResponse(response);
   } catch (error) {
     console.error('获取月趋势数据失败:', error);
@@ -255,6 +287,251 @@ const isDisabled = computed((): boolean => {
   return formatDateToString(temp) === yesterdayDate.value;
 });
 
+// 获取访问数据概况
+const fetchSummaryData = async (date: string): Promise<void> => {
+  try {
+    summaryLoading.value = true;
+    const response = await getUserSummaryData(dayjs(date).format('YYYYMMDD'));
+    if (response.code === 0) {
+      summaryData.value = response.data.list;
+    }
+  } catch (error) {
+    console.error('获取访问数据概况失败:', error);
+  } finally {
+    summaryLoading.value = false;
+  }
+};
+
+// 日期选择器变化事件 - 概况数据
+const handleSummaryDateChange = (date: Dayjs): void => {
+  summaryDate.value = date;
+  fetchSummaryData(date.format('YYYYMMDD'));
+};
+
+// 获取留存数据的通用处理函数
+const handleRetainResponse = (response: any): void => {
+  if (response.code === 0) {
+    retainData.value = response.data;
+    renderRetainChart();
+  }
+};
+
+// 获取日留存
+const fetchDailyRetainData = async (beginDate: string): Promise<void> => {
+  try {
+    retainLoading.value = true;
+    const response = await getUserRetainTrendData('daily', beginDate);
+    handleRetainResponse(response);
+  } catch (error) {
+    console.error('获取日留存数据失败:', error);
+  } finally {
+    retainLoading.value = false;
+  }
+};
+
+// 获取周留存
+const fetchWeeklyRetainData = async (beginDate: string, endDate: string): Promise<void> => {
+  try {
+    retainLoading.value = true;
+    const response = await getUserRetainTrendData('weekly', beginDate, endDate);
+    handleRetainResponse(response);
+  } catch (error) {
+    console.error('获取周留存数据失败:', error);
+  } finally {
+    retainLoading.value = false;
+  }
+};
+
+// 获取月留存
+const fetchMonthlyRetainData = async (beginDate: string, endDate: string): Promise<void> => {
+  try {
+    retainLoading.value = true;
+    const response = await getUserRetainTrendData('monthly', beginDate, endDate);
+    handleRetainResponse(response);
+  } catch (error) {
+    console.error('获取月留存数据失败:', error);
+  } finally {
+    retainLoading.value = false;
+  }
+};
+
+// 根据时间类型获取留存数据
+const fetchRetainData = (type: string, date: string): void => {
+  if (type === 'day') {
+    fetchDailyRetainData(date);
+  } else if (type === 'week') {
+    const [startDate, endDate] = date.split('-');
+    fetchWeeklyRetainData(startDate, endDate);
+  } else if (type === 'month') {
+    const [startDate, endDate] = date.split('-');
+    fetchMonthlyRetainData(startDate, endDate);
+  }
+};
+
+// 切换留存时间类型
+const switchRetainTimeType = (type: string): void => {
+  activeRetainTimeType.value = type;
+  // 根据新的时间类型重置日期选择器
+  resetRetainDatePicker(type);
+};
+
+// 重置留存日期选择器
+const resetRetainDatePicker = (type: string): void => {
+  const today = new Date();
+  
+  if(type === 'day'){
+    const yesterday = getDateWithOffset(today, -1);
+    selectedRetainDate.value = dayjs(yesterday);
+    backendRetainDate.value = formatDateToString(yesterday);
+  } else if (type === 'week') {
+    // 获取当前周的上一周的周一到周日
+    const lastWeek = getDateWithOffset(today, -7);
+    const monday = new Date(lastWeek);
+    monday.setDate(lastWeek.getDate() - monday.getDay() + 1);
+    const sunday = getDateWithOffset(monday, 6);
+    
+    selectedRetainDate.value = dayjs(monday);
+    backendRetainDate.value = `${formatDateToString(monday)}-${formatDateToString(sunday)}`;
+  } else if (type === 'month') {
+    // 获取上个月的1号
+    const lastMonth = new Date(today);
+    lastMonth.setMonth(today.getMonth() - 1);
+    const firstDayOfMonth = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1);
+    const lastDayOfMonth = new Date(lastMonth.getFullYear(), lastMonth.getMonth() + 1, 0);
+    
+    selectedRetainDate.value = dayjs(firstDayOfMonth);
+    backendRetainDate.value = `${formatDateToString(firstDayOfMonth)}-${formatDateToString(lastDayOfMonth)}`;
+    
+  }
+  fetchRetainData(activeRetainTimeType.value, backendRetainDate.value);
+};
+
+// 留存日期选择器变化事件
+const handleRetainDateChange = (date: Dayjs): void => {
+  selectedRetainDate.value = date;
+  
+  if(activeRetainTimeType.value === 'day'){
+    backendRetainDate.value = date.format('YYYYMMDD');
+    fetchRetainData(activeRetainTimeType.value, backendRetainDate.value);
+  } else if(activeRetainTimeType.value === 'week'){
+    const monday = date.startOf('week').add(1, 'day');
+    const sunday = date.endOf('week').add(1, 'day');
+    backendRetainDate.value = `${monday.format('YYYYMMDD')}-${sunday.format('YYYYMMDD')}`;
+    fetchRetainData(activeRetainTimeType.value, backendRetainDate.value);
+  } else if(activeRetainTimeType.value === 'month'){
+    const firstDay = date.startOf('month');
+    const lastDay = date.endOf('month');
+    backendRetainDate.value = `${firstDay.format('YYYYMMDD')}-${lastDay.format('YYYYMMDD')}`;
+    fetchRetainData(activeRetainTimeType.value, backendRetainDate.value);
+  }
+};
+
+// 初始化留存图表
+const initRetainChart = (): void => {
+  if (retainChartRef.value) {
+    retainChart = echarts.init(retainChartRef.value);
+    window.addEventListener('resize', () => {
+      retainChart?.resize();
+    });
+  }
+};
+
+// 渲染留存图表
+const renderRetainChart = (): void => {
+  if (!retainChart || !retainData.value) return;
+  
+  // 获取留存天数标签
+  const dayLabels = retainData.value.visit_uv_new.map(item => {
+    if (item.key === 0) return '当天';
+    if (item.key === 1) return '次日';
+    if (item.key <= 7) return `${item.key}天后`;
+    if (item.key === 14) return '14天后';
+    if (item.key === 30) return '30天后';
+    return `${item.key}天后`;
+  });
+  
+  // 获取新增用户留存率数据
+  const newRetainRates = retainData.value.visit_uv_new.map((item, index) => {
+    if (index === 0) return 100; // 当天留存率为100%
+    const baseValue = retainData.value!.visit_uv_new[0].value;
+    return baseValue > 0 ? (item.value / baseValue * 100).toFixed(2) : 0;
+  });
+  
+  // 获取活跃用户留存率数据
+  const activeRetainRates = retainData.value.visit_uv.map((item, index) => {
+    if (index === 0) return 100; // 当天留存率为100%
+    const baseValue = retainData.value!.visit_uv[0].value;
+    return baseValue > 0 ? (item.value / baseValue * 100).toFixed(2) : 0;
+  });
+  
+  retainChart.setOption({
+    title: {
+      text: '用户留存率',
+      left: 'center',
+      top: 0
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: function(params: any) {
+        const newUserParam = params[0];
+        const activeUserParam = params[1];
+        return `${newUserParam.name}<br/>${newUserParam.seriesName}: ${newUserParam.value}%<br/>${activeUserParam.seriesName}: ${activeUserParam.value}%`;
+      }
+    },
+    legend: {
+      data: ['新增用户留存率', '活跃用户留存率'],
+      top: 30
+    },
+    grid: {
+      left: '3%',
+      right: '4%',
+      bottom: '3%',
+      top: 80,
+      containLabel: true
+    },
+    xAxis: {
+      type: 'category',
+      data: dayLabels
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: {
+        formatter: '{value}%'
+      }
+    },
+    series: [
+      {
+        name: '新增用户留存率',
+        type: 'line',
+        data: newRetainRates,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 8,
+        itemStyle: {
+          color: '#409EFF'
+        },
+        lineStyle: {
+          width: 3
+        }
+      },
+      {
+        name: '活跃用户留存率',
+        type: 'line',
+        data: activeRetainRates,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 8,
+        itemStyle: {
+          color: '#67C23A'
+        },
+        lineStyle: {
+          width: 3
+        }
+      }
+    ]
+  });
+};
+
 onMounted(() => {
   const today = new Date();
   const yesterday = getDateWithOffset(today, -1);
@@ -270,6 +547,18 @@ onMounted(() => {
   selectedDate.value = dayjs(yesterday);
   backendDate.value = formatDateToString(yesterday);
   fetchTrendData('day', backendDate.value);
+  
+  // 获取访问数据概况
+  summaryDate.value = dayjs(yesterday);
+  fetchSummaryData(yesterdayDate.value);
+  
+  // 初始化留存数据
+  selectedRetainDate.value = dayjs(yesterday);
+  backendRetainDate.value = formatDateToString(yesterday);
+  fetchRetainData('day', backendRetainDate.value);
+  
+  // 初始化留存图表
+  initRetainChart();
 });
 </script>
 
@@ -277,13 +566,125 @@ onMounted(() => {
   <div class="p-5">
     <h1 class="mb-4 text-md">精准医链</h1>
     <div class="dashboard-container">
+      <!-- 访问数据概况卡片 -->
+      <el-row :gutter="20" style="margin-bottom: 20px">
+                <!-- 留存面板 -->
+        <el-col :span="12">
+          <el-card class="retain-card" v-loading="retainLoading" element-loading-text="加载中...">
+            <div class="retain-header">
+              <div class="retain-title-wrapper">
+                <h3 class="retain-title">用户留存数据</h3>
+                <div class="retain-subtitle">微信小程序用户留存分析</div>
+              </div>
+            </div>
+            
+            <div class="retain-tabs">
+              <div class="retain-tab" 
+                   :class="{ active: activeRetainTimeType === 'day' }" 
+                   @click="switchRetainTimeType('day')">日</div>
+              <div class="retain-tab" 
+                   :class="{ active: activeRetainTimeType === 'week' }" 
+                   @click="switchRetainTimeType('week')">周</div>
+              <div class="retain-tab" 
+                   :class="{ active: activeRetainTimeType === 'month' }" 
+                   @click="switchRetainTimeType('month')">月</div>
+              
+              <div class="retain-date-picker">
+                <a-date-picker 
+                  :locale="locale"
+                  v-if="activeRetainTimeType === 'day'" 
+                  :value="selectedRetainDate" 
+                  :disabled-date="disabledDate"
+                  @change="handleRetainDateChange" />
+                <a-date-picker 
+                  :locale="locale"
+                  v-if="activeRetainTimeType === 'week'" 
+                  picker="week" 
+                  :value="selectedRetainDate" 
+                  :disabled-date="disabledDate"
+                  @change="handleRetainDateChange" />
+                <a-date-picker 
+                  :locale="locale"
+                  v-if="activeRetainTimeType === 'month'" 
+                  picker="month" 
+                  :value="selectedRetainDate" 
+                  :disabled-date="disabledDate"
+                  @change="handleRetainDateChange" />
+              </div>
+            </div>
+            
+            <div v-if="retainData" class="retain-chart-container">
+              <div ref="retainChartRef" class="retain-chart"></div>
+              <div class="retain-data-summary">
+                <div class="retain-summary-item">
+                  <div class="retain-summary-label">日期</div>
+                  <div class="retain-summary-value">{{ retainData.ref_date }}</div>
+                </div>
+                <div class="retain-summary-item">
+                  <div class="retain-summary-label">新增用户</div>
+                  <div class="retain-summary-value">{{ retainData.visit_uv_new[0]?.value || 0 }}</div>
+                </div>
+                <div class="retain-summary-item">
+                  <div class="retain-summary-label">活跃用户</div>
+                  <div class="retain-summary-value">{{ retainData.visit_uv[0]?.value || 0 }}</div>
+                </div>
+                <div class="retain-summary-item">
+                  <div class="retain-summary-label">次日留存率</div>
+                  <div class="retain-summary-value">
+                    {{ retainData.visit_uv_new[0]?.value ? ((retainData.visit_uv_new[1]?.value || 0) / retainData.visit_uv_new[0].value * 100).toFixed(2) : 0 }}%
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div v-else-if="!retainLoading" class="retain-empty">
+              暂无数据
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="12">
+          <el-card class="summary-card" v-loading="summaryLoading" element-loading-text="加载中...">
+            <div class="summary-header">
+              <div class="summary-title-wrapper">
+                <h3 class="summary-title">访问数据概况</h3>
+              </div>
+              <div class="summary-date-picker">
+                <a-date-picker
+                  :locale="locale"
+                  :value="summaryDate"
+                  :disabled-date="disabledDate"
+                  @change="handleSummaryDateChange"
+                />
+              </div>
+            </div>
+            <div class="summary-content">
+              <div v-if="summaryData.length > 0" class="summary-items">
+                <div class="summary-item">
+                  <div class="summary-value">{{ summaryData[0].visit_total }}</div>
+                  <div class="summary-label">访问总人数</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-value">{{ summaryData[0].share_pv }}</div>
+                  <div class="summary-label">转发次数</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-value">{{ summaryData[0].share_uv }}</div>
+                  <div class="summary-label">转发人数</div>
+                </div>
+              </div>
+              <div v-else-if="!summaryLoading" class="summary-empty">暂无数据</div>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+      
       <el-row :gutter="20" style="margin-top: 20px">
         <!-- 趋势面板 -->
         <el-col :span="12">
           <el-card class="trend-card">
             <div class="trend-header">
               <div class="trend-title-wrapper">
-                <h3 class="trend-title">访问数据趋势</h3>
+                <h3 class="trend-title">用户访问数据</h3>
                 <div class="trend-subtitle">微信小程序访问趋势数据分析</div>
               </div>
             </div>
@@ -829,5 +1230,231 @@ onMounted(() => {
   padding: 40px 0;
   color: #909399;
   font-size: 14px;
+}
+
+/* 访问数据概况样式 */
+.summary-card {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.summary-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, var(--el-color-success), var(--el-color-primary));
+  opacity: 0.8;
+}
+
+.summary-card:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.summary-title-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  position: relative;
+}
+
+.summary-subtitle {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.summary-content {
+  padding: 10px 0;
+}
+
+.summary-items {
+  display: flex;
+  justify-content: space-around;
+}
+
+.summary-item {
+  text-align: center;
+  padding: 20px;
+  border-radius: 8px;
+  background-color: #f5f7fa;
+  transition: all 0.3s ease;
+}
+
+.summary-item:hover {
+  background-color: #ecf5ff;
+  transform: translateY(-5px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.summary-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: var(--el-color-primary);
+  margin-bottom: 8px;
+}
+
+.summary-label {
+  font-size: 14px;
+  color: #606266;
+}
+
+.summary-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: #909399;
+  font-size: 14px;
+}
+
+.summary-date-picker {
+  margin-left: auto;
+}
+
+/* 留存面板样式 */
+.retain-card {
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.retain-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, var(--el-color-primary), var(--el-color-danger));
+  opacity: 0.8;
+}
+
+.retain-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.retain-title-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.retain-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+  position: relative;
+}
+
+.retain-subtitle {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+
+.retain-tabs {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.retain-tab {
+  padding: 6px 16px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-right: 10px;
+  font-size: 14px;
+  color: #606266;
+  transition: all 0.2s ease;
+}
+
+.retain-tab:hover {
+  background-color: rgba(64, 158, 255, 0.08);
+  color: var(--el-color-primary);
+}
+
+.retain-tab.active {
+  background-color: var(--el-color-primary);
+  color: white;
+}
+
+.retain-date-picker {
+  margin-left: auto;
+}
+
+.retain-chart-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.retain-chart {
+  margin-bottom: 20px;
+}
+
+.retain-data-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.retain-summary-item {
+  background-color: #f5f7fa;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+  width: calc(50% - 10px);
+  transition: all 0.3s ease;
+}
+
+.retain-summary-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.retain-summary-label {
+  font-size: 14px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.retain-summary-value {
+  font-size: 22px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.retain-empty {
+  text-align: center;
+  padding: 40px 0;
+  color: #909399;
+  font-size: 14px;
+  height: 350px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 </style>

@@ -2,6 +2,7 @@ import App from "./App.vue";
 import router from "./router";
 import { setupStore } from "@/store";
 import ElementPlus from "element-plus";
+import Antd from 'ant-design-vue';
 import { getServerConfig } from "./config";
 import { createApp, Directive } from "vue";
 import { MotionPlugin } from "@vueuse/motion";
@@ -18,6 +19,7 @@ import "./style/index.scss";
 // 一定要在main.ts中导入tailwind.css，防止vite每次hmr都会请求src/style/index.scss整体css文件导致热更新慢的问题
 import "./style/tailwind.css";
 import "element-plus/dist/index.css";
+import 'ant-design-vue/dist/reset.css';
 // 导入字体图标
 import "./assets/iconfont/iconfont.js";
 import "./assets/iconfont/iconfont.css";
@@ -53,6 +55,7 @@ getServerConfig(app).then(async config => {
   app
     .use(MotionPlugin)
     .use(ElementPlus)
+    .use(Antd)
     // .use(useEcharts);
     .use(Table)
     .use(PureDescriptions);

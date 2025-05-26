@@ -7,7 +7,7 @@
   "editor.tabSize": 2,
   "editor.formatOnPaste": true,
   "editor.guides.bracketPairs": "active",
-  "files.autoSave": "afterDelay",
+  "files.autoSave": "off",
   "git.confirmSync": false,
   "workbench.startupEditor": "newUntitledFile",
   "editor.suggestSelection": "first",
@@ -27,6 +27,11 @@
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
   },
-  "iconify.excludes": ["el"],
-  "cSpell.words": ["iconify", "Qrcode"]
+  "iconify.excludes": [
+    "el"
+  ],
+  "cSpell.words": [
+    "iconify",
+    "Qrcode"
+  ]
 }
